@@ -95,22 +95,53 @@ class Resnet50_Dino(nn.Module):
         x = self.embedder(x)
         return x
         
-class Resnet50_Luperson(nn.Module):
-    def __init__(self, embedding_dim=1024, weights_path='/home/dled/sai/DAVEnet/DAVEnet-pytorch/weights/lup_moco_r50.pth'):
-        super(Resnet50_Luperson, self).__init__()
+class Resnet50_MOCO(nn.Module):
+    def __init__(self, embedding_dim=1024, weights_path='lup'):
+        super(Resnet50_MOCO, self).__init__()
         # Load ResNet50 model
+        PATH = None
+        if weights_path=='lup':
+            PATH = '/home/dled/sai/DAVEnet/DAVEnet-pytorch/weights/lup_moco_r50.pth'
+        elif weights_path=="inet":
+            PATH = '/home/dled/sai/DAVEnet/DAVEnet-pytorch/weights/moco_v1_200ep_pretrain.pth'
+        else:
+            raise "pass a suitable weights file"
+
         self.resnet50 = imagemodels.resnet50(pretrained=False)  # Get the ResNet50 architecture
-        self.resnet50.fc = nn.Identity()  # Remove the classification layer
+        #self.resnet50.fc = nn.Identity()  # Remove the classification layer
 
         # Embedding layer
         self.embedder = nn.Conv2d(2048, embedding_dim, kernel_size=1, stride=1, padding=0)
 
         # Load pre-trained weights for Luperson dataset
-        state_dict = torch.load(weights_path)
-        self.resnet50.load_state_dict(state_dict)
+        if weights_path =='inet':
+
+            # for name, param in self.resnet50.named_parameters():
+            #     if name not in ['fc.weight', 'fc.bias']:
+            #         param.requires_grad = False
+            # init the fc layer
+            
+            checkpoint = torch.load(PATH, map_location="cpu")
+            state_dict = checkpoint['state_dict']
+            for k in list(state_dict.keys()):
+                # retain only encoder_q up to before the embedding layer
+                if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
+                    # remove prefix
+                    state_dict[k[len("module.encoder_q."):]] = state_dict[k]
+                # delete renamed or unused k
+                del state_dict[k]
+            
+            msg = self.resnet50.load_state_dict(state_dict, strict=False)
+            assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
+
+        else:
+            state_dict = torch.load(PATH)
+            self.resnet50.load_state_dict(state_dict)
+
         self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-2]) 
 
     def forward(self, x):
         x = self.resnet50(x)
         x = self.embedder(x)
         return x
+
