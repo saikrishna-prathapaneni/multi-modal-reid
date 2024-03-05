@@ -1,4 +1,5 @@
-# Author: David Harwath
+# Author: Sai Krishna Prathapaneni
+# reference from: https://github.com/dharwath/DAVEnet-pytorch
 import argparse
 import os
 import pickle
@@ -47,6 +48,8 @@ parser.add_argument("--audio-model", type=str, default="Davenet",
         help="audio model architecture", choices=["Davenet"])
 parser.add_argument("--image-model", type=str, default="resnet",
         help="image model architecture", choices=["VGG16"])
+parser.add_argument("--text_model", type=str, default="bert",
+        help="text model architecture", choices=["bert"])
 parser.add_argument("--pretrained-image-model", action="store_true",
     dest="pretrained_image_model", help="Use an image network pretrained on ImageNet")
 parser.add_argument("--margin", type=float, default=1.0, help="Margin paramater for triplet loss")
@@ -56,6 +59,8 @@ parser.add_argument("--recall_type", type=str, default="topk",
         help="recall function type", choices=["topn", "topk"])
 
 args = parser.parse_args()
+
+
 
 resume = args.resume
 
@@ -97,6 +102,8 @@ if not args.resume:
 
 
 train(audio_model, image_model, train_loader, val_loader, args)
+
+# testing the model performance
 # if __name__ =="__main__":
     
 #         audio_model = audio_model.to("cuda")

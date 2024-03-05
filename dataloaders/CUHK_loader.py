@@ -1,5 +1,5 @@
-# Author: David Harwath
-# with some functions borrowed from https://github.com/SeanNaren/deepspeech.pytorch
+# Author: Sai Krishna Prathapaneni
+# with some functions borrowed from https://github.com/SeanNaren/deepspeech.pytorch and https://github.com/dharwath/DAVEnet-pytorch
 import json
 import librosa
 import numpy as np
@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+from transformers import BertTokenizer
 
 def preemphasis(signal,coeff=0.97):
     """perform preemphasis on the input signal.
@@ -23,7 +24,7 @@ def preemphasis(signal,coeff=0.97):
 # dataset_path = "/mnt/NAS/data/ruixuan/data/DLED/CUHK-PEDES/CUHK-PEDES/"
 # json_path = os.path.join(dataset_path, "caption_all.json") 
 class ImageCaptionDataset(Dataset):
-    def __init__(self, dataset_json_file, type="train", audio_conf=None, image_conf=None):
+    def __init__(self, dataset_json_file, type="train", text_conf = None, audio_conf=None, image_conf=None):
         """
         Dataset that manages a set of paired images and audio recordings
 
@@ -45,6 +46,7 @@ class ImageCaptionDataset(Dataset):
         self.data = pd.read_json(self.path)
         # self.image_base_path = data_json['file_path']
         # self.audio_base_path = data_json['audio_path']
+       
 
         if not audio_conf:
             self.audio_conf = {}
@@ -55,6 +57,11 @@ class ImageCaptionDataset(Dataset):
             self.image_conf = {}
         else:
             self.image_conf = image_conf
+
+        if not text_conf:
+            self.text_conf ={}
+        else:
+            self.text_conf = text_conf
 
         crop_size = self.image_conf.get('crop_size', 224)
         center_crop = self.image_conf.get('center_crop', False)
@@ -73,6 +80,9 @@ class ImageCaptionDataset(Dataset):
         self.windows = {'hamming': scipy.signal.hamming,
         'hann': scipy.signal.hann, 'blackman': scipy.signal.blackman,
            'bartlett': scipy.signal.bartlett}
+        
+        #tokenizer
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
     def _LoadAudio(self, path):
         audio_type = self.audio_conf.get('audio_type', 'melspectrogram')
@@ -133,6 +143,10 @@ class ImageCaptionDataset(Dataset):
         #     img = transform(img)
         #     img = self.image_normalize(img)
         return img
+    
+    def _LoadText(self, text):
+        encoding = self.tokenizer(text, padding='max_length', truncation=True, max_length=512, return_tensors="pt")
+        return encoding.input_ids, encoding.attention_mask
 
     def __getitem__(self, index):
         """
@@ -145,10 +159,13 @@ class ImageCaptionDataset(Dataset):
         wavpath = str(datum['audio_path'].iloc[0])
         imgpath = os.path.join(self.dir,"imgs",datum['file_path'].iloc[0])
         id = int(datum['id'].iloc[0])
+
+        text = str(self.data.iloc[index]['text_field_name'])  # Replace 'text_field_name' with the actual field name
+        input_ids, attention_mask = self._LoadText(text)
         
         audio, nframes = self._LoadAudio(wavpath)
         image = self._LoadImage(imgpath)
-        return image, audio, nframes, id
+        return image, audio, nframes, id , input_ids, attention_mask
 
     def __len__(self):
         return len(self.data)
