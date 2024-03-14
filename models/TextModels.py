@@ -1,30 +1,37 @@
 import torch
-from transformers import BertTokenizer, BertModel
+from transformers import BertModel
 
-
-class BertEmbedding:
-    def __init__(self):
-        # Initialize the tokenizer and model
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+class BertEmbedding(torch.nn.Module):
+    def __init__(self, target_embedding=1024, hidden_state = "mean"):
+        super(BertEmbedding, self).__init__()
+        # Initialize the BERT model
         self.model = BertModel.from_pretrained('bert-base-uncased')
+        self.hidden_state_mean = hidden_state
+        # Linear layer to transform the CLS token's embedding
+        self.embed = torch.nn.Linear(768, target_embedding)  # Projecting from 768 to 1024 dimensions
 
-    def forward(self, text):
-        # Encode the text, adding the special tokens needed for BERT
-        input_ids = self.tokenizer.encode(text, add_special_tokens=True)
-        input_tensor = torch.tensor([input_ids])
+        # Activation and normalization layers
+        self.activation = torch.nn.ReLU()
+        self.norm = torch.nn.LayerNorm(1024)
 
-        # Get the embeddings
-        
-        outputs = self.model(input_tensor)
-        last_hidden_states = outputs.last_hidden_state
+    def forward(self, x):
+        # Pass inputs through BERT model
+        outputs = self.model(input_ids=x[0], attention_mask=x[1])
 
-        # Example: Get the embedding of the first token
-        embedding_of_first_token = last_hidden_states[0][0]
-        return embedding_of_first_token
+        # Use the output of the CLS token
+        #print("last hidden state output: ",outputs.last_hidden_state.shape)
+        cls_output = None
+        if self.hidden_state_mean =="mean":
+            cls_output = torch.mean(outputs.last_hidden_state, dim =1)
+        elif self.hidden_state_mean =="cls":
+            cls_output = outputs.last_hidden_state[:, 0, :]  # Shape: [batch_size, 768] just consider the CLS token
+        else:
+            cls_output = outputs.last_hidden_state
+         
 
-# Example usage
-if __name__ == "__main__":
-    extractor = BertEmbedding()
-    text = "Hello, my name is ChatGPT."
-    embedding = extractor.get_embedding(text)
-    print(embedding.shape)
+        # Pass CLS token's output through additional layers
+        x = self.embed(cls_output)  # Shape: [batch_size, 1024]
+        x = self.activation(x)
+        x = self.norm(x)
+
+        return x
