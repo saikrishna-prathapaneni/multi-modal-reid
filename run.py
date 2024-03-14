@@ -11,9 +11,10 @@ import dataloaders
 import models
 from steps import train, validate
 import warnings
-
+from transformers import BertModel
 # # Suppress all Deprecation warnings
-
+import logging
+from datetime import datetime
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 print("I am process %s, running on %s: starting (%s)" % (
@@ -50,17 +51,28 @@ parser.add_argument("--image-model", type=str, default="resnet",
         help="image model architecture", choices=["VGG16"])
 parser.add_argument("--text_model", type=str, default="bert",
         help="text model architecture", choices=["bert"])
+parser.add_argument("--use_text_backbone", type=bool, default=True,
+        help="text backbone architecture")
+parser.add_argument("--different_text_prompt", type=bool, default=True,
+        help="different text prompt for similarity match")
 parser.add_argument("--pretrained-image-model", action="store_true",
     dest="pretrained_image_model", help="Use an image network pretrained on ImageNet")
 parser.add_argument("--margin", type=float, default=1.0, help="Margin paramater for triplet loss")
 parser.add_argument("--simtype", type=str, default="MISA",
         help="matchmap similarity function", choices=["SISA", "MISA", "SIMA"])
+parser.add_argument("--use_alpha_beta", type=bool, default=False,
+        help="using beta and alpha hyperparameter functions for loss computation")
 parser.add_argument("--recall_type", type=str, default="topk",
         help="recall function type", choices=["topn", "topk"])
 
 args = parser.parse_args()
 
-
+log_dir = "logs"
+os.makedirs(log_dir, exist_ok=True)
+logging.basicConfig(filename=os.path.join(log_dir, f'training_{datetime.now().strftime("%Y%m%d%H%M%S")}.log'),
+                    level=logging.INFO,
+                    format='%(asctime)s %(levelname)s: %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
 
 resume = args.resume
 
@@ -72,11 +84,11 @@ args.resume = resume
         
 
 train_loader = torch.utils.data.DataLoader(
-    dataloaders.ImageCaptionDataset(args.data_train),
-    batch_size=args.batch_size, shuffle=True, num_workers=2)
+    dataloaders.ImageCaptionDataset(args,args.data_train),
+    batch_size=8, shuffle=True, num_workers=2)
 
 val_loader = torch.utils.data.DataLoader(
-    dataloaders.ImageCaptionDataset(args.data_val, image_conf={'center_crop':False},type="test"),
+    dataloaders.ImageCaptionDataset(args,args.data_val, image_conf={'center_crop':False},type="test"),
     batch_size=args.batch_size//2,shuffle=False, num_workers=2)
 
 audio_model = models.EnhancedDavenet()
@@ -87,10 +99,15 @@ audio_model = models.EnhancedDavenet()
 
 image_model = models.Resnet50(pretrained=True)
 
+#text_model = BertModel.from_pretrained('bert-base-uncased')
+text_model= None
+if args.use_text_backbone:
+        text_model = models.BertEmbedding()
+
 if not bool(args.exp_dir):
     print("exp_dir not specified, automatically creating one...")
-    args.exp_dir = "exp/Data-%s/AudioModel-%s_ImageModel-%s_Optim-%s_LR-%s_Epochs-%s_tweak_resnet50_I" % (
-        os.path.basename(args.data_train), args.audio_model, args.image_model, args.optim,
+    args.exp_dir = "exp/Data-%s/AudioModel-%s_ImageModel-%s_TextModel-%s_Optim-%s_LR-%s_Epochs-%s_tweak_resnet50_I" % (
+        os.path.basename(args.data_train), args.audio_model, args.image_model, args.text_model, args.optim,
         args.lr, args.n_epochs)
 
 if not args.resume:
@@ -101,24 +118,58 @@ if not args.resume:
         pickle.dump(args, f)
 
 
-train(audio_model, image_model, train_loader, val_loader, args)
+train(audio_model, image_model, text_model, train_loader, val_loader, args)
 
 # testing the model performance
 # if __name__ =="__main__":
-    
+        
+#         def check_weights(model1, model2):
+#                 for p1, p2 in zip(model1.parameters(), model2.parameters()):
+#                         if p1.data.ne(p2.data).sum() > 0:
+#                                 return False
+#                 return True
+#         def count_trainable_params(model):
+#                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+#         audio_model1 = audio_model.to("cuda")
+#         image_model1 = image_model.to("cuda")
+#         text_model1 = text_model.to("cuda")
+#         model_records = []  # To store model records
+        
 #         audio_model = audio_model.to("cuda")
 #         image_model = image_model.to("cuda")
-#         model_records = []  # To store model records
-
-#         i = 85
-#         args.exp_dir = "/home/dled/sai/DAVEnet/DAVEnet-pytorch/exp/Data-/AudioModel-Davenet_ImageModel-resnet_Optim-sgd_LR-0.001_Epochs-50_LUP_resnet50"
+#         text_model = text_model.to("cuda")
+#         i = 1
+#         k = 10
+#         args.exp_dir = "/home/sp7238/sai/mulit-model-reid/multi-modal-reid/exp/Data-/AudioModel-Davenet_ImageModel-resnet_Optim-sgd_LR-0.001_Epochs-50_tweak_resnet50_I/"
         
-#         #audio_model.load_state_dict(torch.load("%s/models/audio_model.%d.pth" % (args.exp_dir, i)))
-#         #image_model.load_state_dict(torch.load("%s/models/image_model.%d.pth" % (args.exp_dir, i)))
-#         audio_model.load_state_dict(torch.load("%s/models/best_audio_model.pth" % (args.exp_dir)))
-#         image_model.load_state_dict(torch.load("%s/models/best_image_model.pth" % (args.exp_dir)))
+#         audio_model.load_state_dict(torch.load("%s/models/audio_model.%d.pth" % (args.exp_dir, i)))
+#         image_model.load_state_dict(torch.load("%s/models/image_model.%d.pth" % (args.exp_dir, i)))
+#         text_model.load_state_dict(torch.load("%s/models/text_model.%d.pth" % (args.exp_dir,i)))
+        
+#         audio_model1.load_state_dict(torch.load("%s/models/audio_model.%d.pth" % (args.exp_dir,k)))
+#         image_model1.load_state_dict(torch.load("%s/models/image_model.%d.pth" % (args.exp_dir,k)))
+#         text_model1.load_state_dict(torch.load("%s/models/text_model.%d.pth" % (args.exp_dir,k)))
+        
+#         num_trainable_params_audio = count_trainable_params(audio_model)
+#         num_trainable_params_image = count_trainable_params(image_model)
+#         num_trainable_params_text = count_trainable_params(text_model)
 
-#         recalls = validate(audio_model, image_model, val_loader, args)
+#         print(f"Number of trainable parameters in audio model: {num_trainable_params_audio}")
+#         print(f"Number of trainable parameters in image model: {num_trainable_params_image}")
+#         print(f"Number of trainable parameters in text model: {num_trainable_params_text}")
+                
+#         # are_audio_weights_same = check_weights(audio_model, audio_model1)
+#         # are_image_weights_same = check_weights(image_model, image_model1)
+#         # are_text_weights_same = check_weights(text_model, text_model1)
+
+#         # print(f"Audio model weights are the same: {are_audio_weights_same}")
+#         # print(f"Image model weights are the same: {are_image_weights_same}")
+#         # print(f"Text model weights are the same: {are_text_weights_same}")
+        
+
+        
+#         #recalls = validate(audio_model, image_model, val_loader, args)
 #         print("epcoch: ", i)
 
 #   model_records.append((i, recalls))  # Record model number and its performance

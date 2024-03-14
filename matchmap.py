@@ -14,7 +14,7 @@ import dataloaders
 import models
 from steps import train, validate
 import warnings
-# [Your existing imports, model definitions, and initializations...]
+
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -47,6 +47,7 @@ def computeMatchmap(I, A):
     matchmap = matchmap.view(H, W, T)  
     return matchmap
 
+
 def matchmapSim(M, simtype):
     assert(M.dim() == 3)
     if simtype == 'SISA':
@@ -65,7 +66,7 @@ def matchmapSim(M, simtype):
 
 
 
-def get_single_matchmap(val_loader, audio_model, image_model, device = "cuda:2"):
+def get_single_matchmap(val_loader, audio_model, image_model, device = "cuda:1"):
 
     audio_model = audio_model.to(device)
     image_model = image_model.to(device)
