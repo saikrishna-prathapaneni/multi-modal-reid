@@ -99,11 +99,11 @@ def save_top_images(audio_index, A2I_ind, val_loader, save_dir ="res"):
     plt.close(fig) 
 
 
-def calc_recalls_reid(image_outputs, audio_outputs, nframes, id_output, val_loader, visualise_id = 100, simtype='MISA'):
+def calc_recalls_reid(image_outputs, modal_outputs, nframes, id_output, val_loader,type = "text", visualise_id = 100, simtype='MISA'):
     """
     Computes recall at 1, 5, and 10 given encoded image and audio outputs.
     """
-    S = compute_matchmap_similarity_matrix(image_outputs, audio_outputs, nframes, simtype=simtype)
+    S = compute_matchmap_similarity_matrix(image_outputs, modal_outputs, nframes,type, simtype=simtype)
     n = S.size(0)
     A2I_scores, A2I_ind = S.topk(20, 0)
     I2A_scores, I2A_ind = S.topk(20, 1)
@@ -185,78 +185,205 @@ def calc_recalls_reid(image_outputs, audio_outputs, nframes, id_output, val_load
     return recalls
 
 
-def computeMatchmap(I, A):
+def computeMatchmapAudio(I, A):
+    """
+    compute matchmap betweem Image features and Audio features
+
+    """
     assert(I.dim() == 3)
     assert(A.dim() == 2)
     D = I.size(0)
     H = I.size(1)
     W = I.size(2)
     T = A.size(1)                                                                                                                     
-    Ir = I.view(D, -1).t()
-    matchmap = torch.mm(Ir, A)
-    matchmap = matchmap.view(H, W, T)  
+    Ir = I.view(D, -1).t() # flatten features  and transpose (1024,7,7) -> (49,1024)  and A would have the feature of (1024,44)
+    matchmap = torch.mm(Ir, A) #(49,44)
+    matchmap = matchmap.view(H, W, T) # (7,7,44)
     return matchmap
+
+
+def computeMatchmapText(I, T):
+    """
+    compute matchmap betweem Image features and Text features
+
+    """
+    assert(I.dim() == 3)
+    assert(T.dim() == 1)
+
+    D = I.size(0)
+    H = I.size(1)
+    W = I.size(2)
+    #T = A.size(1)                                                                                                                     
+    Ir = I.view(D, -1).t() # flatten features  and transpose (1024,7,7) -> (49,1024)  and T would have the feature of (1024,1)
+    matchmap = torch.mm(Ir, T.unsqueeze(1)) #(49,1) since only CLS token/average of vectors is considered for the computation
+    matchmap = matchmap.view(H, W, 1) # (7,7,1)
+    return matchmap
+    
+
 
 def matchmapSim(M, simtype):
     assert(M.dim() == 3)
     if simtype == 'SISA':
         return M.mean()
     elif simtype == 'MISA':
-        M_maxH, _ = M.max(0)
-        M_maxHW, _ = M_maxH.max(0)
-        return M_maxHW.mean()
+        M_maxH, _ = M.max(0) #(7,44) 
+        M_maxHW, _ = M_maxH.max(0) #(44)
+        return M_maxHW.mean() #mean across 44 dim values
     elif simtype == 'SIMA':
         M_maxT, _ = M.max(2)
         return M_maxT.mean()
     else:
         raise ValueError
 
-def sampled_margin_rank_loss(image_outputs, audio_outputs, nframes,id, margin=1., simtype='MISA'):
+def sampled_margin_rank_loss(args, image_outputs, audio_outputs,
+                              text_outputs, nframes, id, alpha, beta, margin=1., simtype='MISA'):
     """
     Computes the triplet margin ranking loss for each anchor image/caption pair
     The impostor image/caption is randomly sampled from the minibatch
     """
     assert(image_outputs.dim() == 4)
     assert(audio_outputs.dim() == 3)
-    n = image_outputs.size(0)
-    loss = torch.zeros(1, device=image_outputs.device, requires_grad=True)
-    for i in range(n):
-        I_imp_ind = i
-        A_imp_ind = i
-        while I_imp_ind == i or id[I_imp_ind] == id[i]: #tweak for reid
-            I_imp_ind = np.random.randint(0, n)
-        while A_imp_ind == i  or id[A_imp_ind] == id[i]: # tweak for reid
-            A_imp_ind = np.random.randint(0, n)
-        nF = nframes[i]
-        nFimp = nframes[A_imp_ind]
-        anchorsim = matchmapSim(computeMatchmap(image_outputs[i], audio_outputs[i][:, 0:nF]), simtype)
-        Iimpsim = matchmapSim(computeMatchmap(image_outputs[I_imp_ind], audio_outputs[i][:, 0:nF]), simtype)
-        Aimpsim = matchmapSim(computeMatchmap(image_outputs[i], audio_outputs[A_imp_ind][:, 0:nFimp]), simtype)
-        A2I_simdif = margin + Iimpsim - anchorsim
-        if (A2I_simdif.data > 0).all():
-            loss = loss + A2I_simdif
-        I2A_simdif = margin + Aimpsim - anchorsim
-        if (I2A_simdif.data > 0).all():
-            loss = loss + I2A_simdif
-    loss = loss / n
-    return loss
+    assert(text_outputs.dim() == 2)
 
-def compute_matchmap_similarity_matrix(image_outputs, audio_outputs, nframes, simtype='MISA'):
+    n = image_outputs.size(0)
+    loss_total = torch.zeros(1, device=image_outputs.device, requires_grad=True)
+    
+    
+    if not args.use_text_backbone: # loss computation with audio and vision
+        
+        for i in range(n):
+            I_imp_ind = i
+            A_imp_ind = i
+            attempt_counter_I = 0
+            while I_imp_ind == i or id[I_imp_ind] == id[i] and attempt_counter_I < 1000: #tweak for reid
+                I_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+            attempt_counter_I = 0
+            while A_imp_ind == i  or id[A_imp_ind] == id[i] and attempt_counter_I < 1000: #tweak for reid
+                A_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+            
+            nF = nframes[i]
+            nFimp = nframes[A_imp_ind]
+            anchorsim = matchmapSim(computeMatchmapAudio(image_outputs[i], audio_outputs[i][:, 0:nF]), simtype)
+            Iimpsim = matchmapSim(computeMatchmapAudio(image_outputs[I_imp_ind], audio_outputs[i][:, 0:nF]), simtype)
+            Aimpsim = matchmapSim(computeMatchmapAudio(image_outputs[i], audio_outputs[A_imp_ind][:, 0:nFimp]), simtype)
+            A2I_simdif = margin + Iimpsim - anchorsim
+            if (A2I_simdif.data > 0).all():
+                loss_total = loss_total + A2I_simdif
+            I2A_simdif = margin + Aimpsim - anchorsim
+            if (I2A_simdif.data > 0).all():
+                loss_total = loss_total + I2A_simdif
+        loss_total = loss_total / n
+        return loss_total
+    else:  # loss computation with audio, vision and text
+        
+        # for audio data
+        loss_audio = torch.zeros(1, device=image_outputs.device, requires_grad=True)
+        loss_text = torch.zeros(1, device=image_outputs.device, requires_grad=True)
+        
+        for i in range(n):
+            I_imp_ind = i
+            A_imp_ind = i
+            
+            attempt_counter_I = 0
+            while I_imp_ind == i or id[I_imp_ind] == id[i] and attempt_counter_I < 1000: #tweak for reid
+                
+                I_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+                if attempt_counter_I ==1000:
+                    break
+
+            
+            attempt_counter_I = 0
+            while A_imp_ind == i  or id[A_imp_ind] == id[i] and attempt_counter_I < 1000: # tweak for reid
+                A_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+                if attempt_counter_I ==1000:
+                    break
+
+            
+            # for audio
+            nF = nframes[i]
+            nFimp = nframes[A_imp_ind]
+            anchorsim = matchmapSim(computeMatchmapAudio(image_outputs[i], audio_outputs[i][:, 0:nF]), simtype)
+            Iimpsim = matchmapSim(computeMatchmapAudio(image_outputs[I_imp_ind], audio_outputs[i][:, 0:nF]), simtype)
+            Aimpsim = matchmapSim(computeMatchmapAudio(image_outputs[i], audio_outputs[A_imp_ind][:, 0:nFimp]), simtype)
+
+            A2I_simdif = margin + Iimpsim - anchorsim
+            if (A2I_simdif.data > 0).all():
+                loss_audio = loss_audio + A2I_simdif
+            I2A_simdif = margin + Aimpsim - anchorsim
+            if (I2A_simdif.data > 0).all():
+                loss_audio = loss_audio + I2A_simdif        
+        loss_audio = loss_audio / n
+        # for text
+        
+        for i in range(n):
+            I_imp_ind = i
+            T_imp_ind = i
+            attempt_counter_I = 0
+            while I_imp_ind == i or id[I_imp_ind] == id[i] and attempt_counter_I < 1000: #tweak for reid
+                I_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+                if attempt_counter_I ==1000:
+                    break
+            
+            attempt_counter_I = 0
+            while T_imp_ind == i  or id[T_imp_ind] == id[i] and attempt_counter_I < 1000: # tweak for reid
+                T_imp_ind = np.random.randint(0, n)
+                attempt_counter_I += 1
+                if attempt_counter_I ==1000:
+                    break
+        
+
+            anchorsim = matchmapSim(computeMatchmapText(image_outputs[i], text_outputs[i]), simtype)
+            Iimpsim = matchmapSim(computeMatchmapText(image_outputs[I_imp_ind], text_outputs[i]), simtype)
+            Timpsim = matchmapSim(computeMatchmapText(image_outputs[i], text_outputs[T_imp_ind]), simtype)
+
+            T2I_simdif = margin + Iimpsim - anchorsim
+            if (T2I_simdif.data > 0).all():
+                loss_text = loss_text + T2I_simdif
+            I2T_simdif = margin + Timpsim - anchorsim
+            if (I2T_simdif.data > 0).all():
+                loss_text = loss_text + I2T_simdif        
+        loss_text = loss_text / n
+        if args.use_alpha_beta:
+            loss_total = alpha*loss_audio + beta*loss_text
+        else:
+            loss_total = loss_audio + loss_text
+    return loss_total
+
+def compute_matchmap_similarity_matrix(image_outputs, modal_outputs, nframes, type, simtype='MISA'):
     """
     Assumes image_outputs is a (batchsize, embedding_dim, rows, height) tensor
     Assumes audio_outputs is a (batchsize, embedding_dim, 1, time) tensor
     Returns similarity matrix S where images are rows and audios are along the columns
     """
-    assert(image_outputs.dim() == 4)
-    assert(audio_outputs.dim() == 3)
-    n = image_outputs.size(0)
-    S = torch.zeros(n, n, device=image_outputs.device)
-    for image_idx in range(n):
-           
-            for audio_idx in range(n):
-                nF = max(1, nframes[audio_idx])
-                S[image_idx, audio_idx] = matchmapSim(computeMatchmap(image_outputs[image_idx], audio_outputs[audio_idx][:, 0:nF]), simtype)
-    return S
+    if type =="audio":
+        # for generating audio based retrieval system
+        assert(image_outputs.dim() == 4)
+        assert(modal_outputs.dim() == 3)
+        n = image_outputs.size(0)
+        S = torch.zeros(n, n, device=image_outputs.device)
+        for image_idx in range(n):
+            
+                for audio_idx in range(n):
+                    nF = max(1, nframes[audio_idx])
+                    S[image_idx, audio_idx] = matchmapSim(computeMatchmapAudio(image_outputs[image_idx], modal_outputs[audio_idx][:, 0:nF]), simtype)
+        return S
+    else:
+        # for generating text based retrieval system
+        assert(image_outputs.dim() == 4)
+        
+        n = image_outputs.size(0)
+        S = torch.zeros(n, n, device=image_outputs.device)
+        for image_idx in range(n):
+            
+                for text_idx in range(n):
+                    #nF = max(1, nframes[audio_idx])
+                    S[image_idx, text_idx] = matchmapSim(computeMatchmapText(image_outputs[image_idx], modal_outputs[text_idx]), simtype)
+        return S
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
