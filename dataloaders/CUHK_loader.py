@@ -24,7 +24,7 @@ def preemphasis(signal,coeff=0.97):
 # dataset_path = "/mnt/NAS/data/ruixuan/data/DLED/CUHK-PEDES/CUHK-PEDES/"
 # json_path = os.path.join(dataset_path, "caption_all.json") 
 class ImageCaptionDataset(Dataset):
-    def __init__(self, dataset_json_file, type="train", text_conf = None, audio_conf=None, image_conf=None):
+    def __init__(self, args, dataset_json_file, type="train", text_conf = None, audio_conf=None, image_conf=None):
         """
         Dataset that manages a set of paired images and audio recordings
 
@@ -33,6 +33,7 @@ class ImageCaptionDataset(Dataset):
         the window length/stride in seconds, and normalization to perform (optional)
         :param image_transform: torchvision transform to apply to the images (optional)
         """
+        self.args = args
         self.dir = dataset_json_file
         self.type = type
         if type =="train":
@@ -103,7 +104,7 @@ class ImageCaptionDataset(Dataset):
         hop_length = int(sample_rate * window_stride)
 
         # load audio, subtract DC, preemphasis
-        y, sr = librosa.load(path, sample_rate)
+        y, sr = librosa.load(path, sr=sample_rate)
         if y.size == 0:
             y = np.zeros(200)
         y = y - y.mean()
@@ -114,7 +115,7 @@ class ImageCaptionDataset(Dataset):
             window=self.windows.get(window_type, self.windows['hamming']))
         spec = np.abs(stft)**2
         if audio_type == 'melspectrogram':
-            mel_basis = librosa.filters.mel(sr, n_fft, n_mels=num_mel_bins, fmin=fmin)
+            mel_basis = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=num_mel_bins, fmin=fmin)
             melspec = np.dot(mel_basis, spec)
             logspec = librosa.power_to_db(melspec, ref=np.max)
         elif audio_type == 'spectrogram':
@@ -146,6 +147,7 @@ class ImageCaptionDataset(Dataset):
     
     def _LoadText(self, text):
         encoding = self.tokenizer(text, padding='max_length', truncation=True, max_length=512, return_tensors="pt")
+        
         return encoding.input_ids, encoding.attention_mask
 
     def __getitem__(self, index):
@@ -159,9 +161,12 @@ class ImageCaptionDataset(Dataset):
         wavpath = str(datum['audio_path'].iloc[0])
         imgpath = os.path.join(self.dir,"imgs",datum['file_path'].iloc[0])
         id = int(datum['id'].iloc[0])
-
-        text = str(self.data.iloc[index]['text_field_name'])  # Replace 'text_field_name' with the actual field name
-        input_ids, attention_mask = self._LoadText(text)
+        if not self.args.different_text_prompt: # using 1st caption, same text as from the audio description
+            text = str(self.data.iloc[index]['caption_1'])  
+            
+        else:  # using 2nd caption, different text from the audio description
+            text = str(self.data.iloc[index]['caption_2'])
+        attention_mask,input_ids = self._LoadText(text)
         
         audio, nframes = self._LoadAudio(wavpath)
         image = self._LoadImage(imgpath)
