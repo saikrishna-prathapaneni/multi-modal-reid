@@ -166,7 +166,7 @@ class ImageCaptionDataset(Dataset):
             
         else:  # using 2nd caption, different text from the audio description
             text = str(self.data.iloc[index]['caption_2'])
-        attention_mask,input_ids = self._LoadText(text)
+        input_ids, attention_mask = self._LoadText(text)
         
         audio, nframes = self._LoadAudio(wavpath)
         image = self._LoadImage(imgpath)
