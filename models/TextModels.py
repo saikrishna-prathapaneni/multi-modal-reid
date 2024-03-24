@@ -12,7 +12,8 @@ class BertEmbedding(torch.nn.Module):
 
         # Activation and normalization layers
         self.activation = torch.nn.ReLU()
-        self.norm = torch.nn.LayerNorm(1024)
+
+        self.norm = torch.nn.BatchNorm1d(1024)
 
     def forward(self, x):
         # Pass inputs through BERT model
@@ -32,6 +33,7 @@ class BertEmbedding(torch.nn.Module):
         # Pass CLS token's output through additional layers
         x = self.embed(cls_output)  # Shape: [batch_size, 1024]
         x = self.activation(x)
-        x = self.norm(x)
+        if x.size(0) > 1:
+            x = self.norm(x)
 
         return x
