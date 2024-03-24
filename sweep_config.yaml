@@ -1,0 +1,27 @@
+project: multi-modal-reid
+method: random  # or random, bayes
+metric:
+  name: ar10
+  goal: maximize
+parameters:
+  lr:
+    min: 0.0001
+    max: 0.01
+  optim:
+    values: ["sgd", "adam", "adagrad"]
+  lr-decay:
+    values: [30, 40, 50]
+  momentum:
+    values: [0.8, 0.9, 0.95]
+  weight-decay:
+    values: [1e-4, 5e-4, 1e-5]
+  different_text_prompt:
+    values: [true, false]
+  use_alpha_beta:
+    values: [true, false]
+  alpha:
+    values: [0.3, 0.5, 0.8]
+  beta:
+    values: [0.8, 0.5, 0.3]
+
+
