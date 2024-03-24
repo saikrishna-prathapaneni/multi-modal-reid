@@ -349,7 +349,7 @@ def sampled_margin_rank_loss(args, image_outputs, audio_outputs,
                 loss_text = loss_text + I2T_simdif        
         loss_text = loss_text / n
         if args.use_alpha_beta:
-            loss_total = alpha*loss_audio + beta*loss_text
+            loss_total = args.alpha*loss_audio + args.beta*loss_text
         else:
             loss_total = loss_audio + loss_text
     return loss_total
