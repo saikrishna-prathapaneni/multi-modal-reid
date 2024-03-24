@@ -9,7 +9,22 @@ import logging
 
 from .util import *
 
-def train(audio_model, image_model, text_model, train_loader, test_loader, args):
+def train(audio_model, image_model, text_model, train_loader, test_loader, args, wandb_config= None):
+
+    # args.lr = wandb_config.lr
+    # args.optim = wandb_config.optim
+    # args.lr-decay = wandb_config.lr-decay
+    # args.momentum = wandb_config.momentum
+    # args.weight-decay = wandb_config.momentum
+    # args.different_text_prompt = wandb_config.different_text_prompt
+    # args.use_alpha_beta = wandb_config.use_alpha_beta
+    # args.alpha = wandb_config.alpha
+    # args.beta = wandb_config.beta
+
+
+
+
+
     logging.info("Training started")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.set_grad_enabled(True)
@@ -62,33 +77,33 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
     alpha = torch.tensor(.5, requires_grad= True)
     beta= torch.tensor(.5, requires_grad= True)
 
-    if args.use_text_backbone: # weight mulitpliers for final loss computation
-        alpha = torch.nn.Parameter(alpha)
-        beta = torch.nn.Parameter(beta)
+    # if args.use_text_backbone: # weight mulitpliers for final loss computation
+    #     alpha = torch.nn.Parameter(alpha)
+    #     beta = torch.nn.Parameter(beta)
     
     # Set up the optimizer
     audio_trainables = [p for p in audio_model.parameters() if p.requires_grad]
     image_trainables = [p for p in image_model.parameters() if p.requires_grad]
     text_trainables = [p for p in text_model.parameters() if p.requires_grad]
-    print(len(text_trainables), len(image_trainables), len(audio_trainables))
+    
     other_trainables = audio_trainables + image_trainables + text_trainables
 
     # Learning rates
-    alpha_lr = args.lr/100  # learning rate for alpha
-    beta_lr = args.lr/100   # learning rate for beta
+    # alpha_lr = args.lr/100  # learning rate for alpha
+    # beta_lr = args.lr/100   # learning rate for beta
     default_lr = args.lr  # Default learning rate for other parameters
 
-    # Group parameters
-    if args.use_alpha_beta:
-        param_groups = [
-            {'params': [alpha], 'lr': alpha_lr},
-            {'params': [beta], 'lr': beta_lr},
-            {'params': other_trainables, 'lr': default_lr}
-            ]
-    else:
-        param_groups=[
-                  {'params': other_trainables, 'lr': default_lr}
-            ]
+    # # Group parameters
+    # if args.use_alpha_beta:
+    #     param_groups = [
+    #         {'params': [alpha], 'lr': alpha_lr},
+    #         {'params': [beta], 'lr': beta_lr},
+    #         {'params': other_trainables, 'lr': default_lr}
+    #         ]
+    # else:
+    param_groups=[
+                {'params': other_trainables, 'lr': default_lr}
+        ]
 
     if args.optim == 'sgd':
        optimizer = torch.optim.SGD(param_groups, args.lr,
@@ -98,6 +113,9 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
         optimizer = torch.optim.Adam(param_groups, args.lr,
                                 weight_decay=args.weight_decay,
                                 betas=(0.95, 0.999))
+    elif args.optim == 'adagrad':
+        optimizer = torch.optim.Adagrad(param_groups, args.lr,
+                                    weight_decay=args.weight_decay)
     else:
         raise ValueError('Optimizer %s is not supported' % args.optim)
 
@@ -118,6 +136,9 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
     image_model.train()
     text_model.train()
     while True:
+
+        if epoch ==30:
+            break
         adjust_learning_rate(args.lr, args.lr_decay, optimizer, epoch)
         end_time = time.time()
         audio_model.train()
@@ -165,6 +186,9 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
             batch_time.update(time.time() - end_time)
 
             if global_step % args.n_print_steps == 0 and global_step != 0:
+                if wandb_config:
+                    wandb_config.log({"step": global_step, "train_loss": loss_meter.val, "batch_time": batch_time.avg})
+                
                 print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -185,12 +209,16 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
             end_time = time.time()
             global_step += 1
         
+       
         
-        recalls = validate(audio_model, image_model, text_model, test_loader, args)
+        
+        recalls = validate(audio_model, image_model, text_model, test_loader, args, epoch =epoch, wandb_config = wandb_config )
         
         avg_acc = (recalls['A_r10'] + recalls['I_r10']) / 2
 
-        
+        if wandb_config:
+            wandb_config.log({"epoch": epoch, "train_loss": loss_meter.avg, "batch_time": batch_time.avg, "ar10": avg_acc})
+
         
         if avg_acc > best_acc:
             best_epoch = epoch
@@ -212,7 +240,7 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args)
         _save_progress()
         epoch += 1
 
-def validate(audio_model, image_model, text_model, val_loader, args, visualise_id = 10):
+def validate(audio_model, image_model, text_model, val_loader, args, epoch, wandb_config= None, visualise_id = 10):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_time = AverageMeter()
     audio_model = audio_model.to(device)
@@ -332,6 +360,13 @@ def validate(audio_model, image_model, text_model, val_loader, args, visualise_i
                 .format(A_r5=A_r5, I_r5=I_r5, N=N_examples))
             logging.info(' * Audio R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
                 .format(A_r1=A_r1, I_r1=I_r1, N=N_examples))
+            
+            if wandb_config:
+                wandb_config.log({"val_audio_recall@20": A_r20, "val_image_recall@20": I_r20, "epoch": epoch})
+                wandb_config.log({"val_audio_recall@10": A_r10, "val_image_recall@10": I_r10, "epoch": epoch})
+                wandb_config.log({"val_audio_recall@5": A_r5, "val_image_recall@5": I_r5, "epoch": epoch})
+                wandb_config.log({"val_audio_recall@1": A_r1, "val_image_recall@5": I_r1, "epoch": epoch})
+
             #for text
             recalls =calc_recalls_reid(image_output, text_output, nframes, id_output, val_loader,type ="text", visualise_id = 10, simtype=args.simtype)
             A_r20 = recalls['A_r20']
@@ -359,6 +394,12 @@ def validate(audio_model, image_model, text_model, val_loader, args, visualise_i
                 .format(A_r5=A_r5, I_r5=I_r5, N=N_examples))
             logging.info(' * Text R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
                 .format(A_r1=A_r1, I_r1=I_r1, N=N_examples))
+            if wandb_config:
+                wandb_config.log({"val_Text_recall@20": A_r20, "val_Text_recall@20": I_r20, "epoch": epoch})
+                wandb_config.log({"val_Text_recall@10": A_r10, "val_Text_recall@10": I_r10, "epoch": epoch})
+                wandb_config.log({"val_Text_recall@5": A_r5, "val_Text_recall@5": I_r5, "epoch": epoch})
+                wandb_config.log({"val_Text_recall@1": A_r1, "val_Text_recall@5": I_r1, "epoch": epoch})
+
 
 
     return recalls
