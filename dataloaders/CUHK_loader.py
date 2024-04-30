@@ -135,9 +135,10 @@ class ImageCaptionDataset(Dataset):
 
     def _LoadImage(self, impath):
         img = Image.open(impath).convert('RGB')
-   
+        # img = transforms.Compose(
+        #         [transforms.ToTensor()])(img)
         img = self.image_resize_and_crop(img)
-        img = self.image_normalize(img)
+        #img = self.image_normalize(img) # needed while training and inference
         # else:
         #     transform = transforms.Compose(
         #         [transforms.Resize(256), transforms.ToTensor()])
@@ -170,7 +171,7 @@ class ImageCaptionDataset(Dataset):
         
         audio, nframes = self._LoadAudio(wavpath)
         image = self._LoadImage(imgpath)
-        return image, audio, nframes, id , input_ids, attention_mask
+        return image, audio, nframes, id , input_ids, attention_mask , text
 
     def __len__(self):
         return len(self.data)

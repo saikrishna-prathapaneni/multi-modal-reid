@@ -102,9 +102,9 @@ class Resnet50_MOCO(nn.Module):
         # Load ResNet50 model
         PATH = None
         if weights_path=='lup':
-            PATH = '/home/dled/sai/DAVEnet/DAVEnet-pytorch/weights/lup_moco_r50.pth'
+            PATH = '/home/sp7238/sai/mulit-model-reid/multi-modal-reid/weights/lup_moco_r50.pth'
         elif weights_path=="inet":
-            PATH = '/home/dled/sai/DAVEnet/DAVEnet-pytorch/weights/moco_v1_200ep_pretrain.pth'
+            PATH = '/home/sp7238/sai/mulit-model-reid/multi-modal-reid/weights/weights/moco_v1_200ep_pretrain.pth'
         else:
             raise "pass a suitable weights file"
 
@@ -137,7 +137,8 @@ class Resnet50_MOCO(nn.Module):
 
         else:
             state_dict = torch.load(PATH)
-            self.resnet50.load_state_dict(state_dict)
+            #self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-2])
+            self.resnet50.load_state_dict(state_dict, strict=False)
 
         self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-2]) 
 

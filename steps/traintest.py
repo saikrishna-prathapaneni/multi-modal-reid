@@ -57,7 +57,8 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args,
 
     audio_model = audio_model.to(device)
     image_model = image_model.to(device)
-    text_model = text_model.to(device)
+    if args.use_text_backbone:
+        text_model = text_model.to(device)
 
     if epoch != 0:
         audio_model.load_state_dict(torch.load("%s/models/audio_model.%d.pth" % (exp_dir, epoch)))
@@ -84,10 +85,11 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args,
     # Set up the optimizer
     audio_trainables = [p for p in audio_model.parameters() if p.requires_grad]
     image_trainables = [p for p in image_model.parameters() if p.requires_grad]
-    text_trainables = [p for p in text_model.parameters() if p.requires_grad]
-    
-    other_trainables = audio_trainables + image_trainables + text_trainables
-
+    if args.use_text_backbone:
+        text_trainables = [p for p in text_model.parameters() if p.requires_grad]
+        other_trainables = audio_trainables + image_trainables + text_trainables
+    else:
+        other_trainables = audio_trainables + image_trainables
     # Learning rates
     # alpha_lr = args.lr/100  # learning rate for alpha
     # beta_lr = args.lr/100   # learning rate for beta
@@ -127,24 +129,24 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args,
                     state[k] = v.to(device)
         print("loaded state dict from epoch %d" % epoch)
 
-    epoch += 1
+
     
     print("current #steps=%s, #epochs=%s" % (global_step, epoch))
     print("start training...")
 
     audio_model.train()
     image_model.train()
-    text_model.train()
+    if args.use_text_backbone:  
+        text_model.train()
     while True:
 
-        if epoch ==30:
-            break
+  
         adjust_learning_rate(args.lr, args.lr_decay, optimizer, epoch)
         end_time = time.time()
         audio_model.train()
         image_model.train()
         
-        for i, (image_input, audio_input, nframes, id, input_ids, attention_mask) in enumerate(train_loader):
+        for i, (image_input, audio_input, nframes, id, input_ids, attention_mask, text) in enumerate(train_loader):
             #logging.info(f'Epoch: {epoch}, Step: {global_step}, Loss: {loss_meter.avg}')
             # measure data loading time
             data_time.update(time.time() - end_time)
@@ -227,16 +229,18 @@ def train(audio_model, image_model, text_model, train_loader, test_loader, args,
                 "%s/models/audio_model.%d.pth" % (exp_dir, epoch))
             torch.save(image_model.state_dict(),
                     "%s/models/image_model.%d.pth" % (exp_dir, epoch))
-            torch.save(text_model.state_dict(),
-                    "%s/models/text_model.%d.pth" % (exp_dir, epoch))
+            if args.use_text_backbone:
+                torch.save(text_model.state_dict(),
+                        "%s/models/text_model.%d.pth" % (exp_dir, epoch))
             torch.save(optimizer.state_dict(), "%s/models/optim_state.%d.pth" % (exp_dir, epoch))
 
             shutil.copyfile("%s/models/audio_model.%d.pth" % (exp_dir, epoch), 
                 "%s/models/best_audio_model.pth" % (exp_dir))
             shutil.copyfile("%s/models/image_model.%d.pth" % (exp_dir, epoch), 
                 "%s/models/best_image_model.pth" % (exp_dir))
-            shutil.copyfile("%s/models/text_model.%d.pth" % (exp_dir, epoch), 
-                "%s/models/best_text_model.pth" % (exp_dir))
+            if args.use_text_backbone:
+                shutil.copyfile("%s/models/text_model.%d.pth" % (exp_dir, epoch), 
+                    "%s/models/best_text_model.pth" % (exp_dir))
         _save_progress()
         epoch += 1
 
@@ -245,7 +249,8 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
     batch_time = AverageMeter()
     audio_model = audio_model.to(device)
     image_model = image_model.to(device)
-    text_model = text_model.to(device)
+    if args.use_text_backbone:
+        text_model = text_model.to(device)
     # if torch.cuda.device_count() > 1:
     #     print(f"Using {torch.cuda.device_count()} GPUs!")
     #     audio_model = nn.DataParallel(audio_model)
@@ -258,7 +263,8 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
     # switch to evaluate mode
     image_model.eval()
     audio_model.eval()
-    text_model.eval()
+    if args.use_text_backbone:
+        text_model.eval()
 
     end = time.time()
     N_examples = val_loader.dataset.__len__()
@@ -270,7 +276,7 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
     ids = []
     print("validation started")
     with torch.no_grad():
-        for i, (image_input, audio_input, nframes, id, input_ids, attention_mask) in enumerate(val_loader):
+        for i, (image_input, audio_input, nframes, id, input_ids, attention_mask, text) in enumerate(val_loader):
             
             image_input = image_input.to(device)
             audio_input = audio_input.to(device)
@@ -292,11 +298,13 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
 
             image_output = image_output.to('cpu').detach()
             audio_output = audio_output.to('cpu').detach()
-            text_output = text_output.to('cpu').detach()
+            if args.use_text_backbone:
+                text_output = text_output.to('cpu').detach()
 
             I_embeddings.append(image_output)
             A_embeddings.append(audio_output)
-            T_embeddings.append(text_output)
+            if args.use_text_backbone:
+                T_embeddings.append(text_output)
 
             total_memory, used_memory, free_memory = map(
                 int, os.popen('free -t -m').readlines()[-1].split()[1:])
@@ -316,7 +324,8 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
         print("calculating recall")
         image_output = torch.cat(I_embeddings)
         audio_output = torch.cat(A_embeddings)
-        text_output = torch.cat(T_embeddings)
+        if args.use_text_backbone:
+            text_output = torch.cat(T_embeddings)
         id_output = torch.cat(ids)
         nframes = torch.cat(frame_counts)
         
@@ -368,39 +377,38 @@ def validate(audio_model, image_model, text_model, val_loader, args, epoch, wand
                 wandb_config.log({"val_audio_recall@1": A_r1, "val_image_recall@5": I_r1, "epoch": epoch})
 
             #for text
-            recalls =calc_recalls_reid(image_output, text_output, nframes, id_output, val_loader,type ="text", visualise_id = 10, simtype=args.simtype)
-            A_r20 = recalls['A_r20']
-            I_r20 = recalls['I_r20']
-            A_r10 = recalls['A_r10']
-            I_r10 = recalls['I_r10']
-            A_r5 = recalls['A_r5']
-            I_r5 = recalls['I_r5']
-            A_r1 = recalls['A_r1']
-            I_r1 = recalls['I_r1']
-            print(' * Text R@20 {A_r20:.3f} Image R@20 {I_r20:.3f} over {N:d} validation pairs'
-                .format(A_r20=A_r20, I_r20=I_r20, N=N_examples), flush=True)
-            print(' * Text R@10 {A_r10:.3f} Image R@10 {I_r10:.3f} over {N:d} validation pairs'
-                .format(A_r10=A_r10, I_r10=I_r10, N=N_examples), flush=True)
-            print(' * Text R@5 {A_r5:.3f} Image R@5 {I_r5:.3f} over {N:d} validation pairs'
-                .format(A_r5=A_r5, I_r5=I_r5, N=N_examples), flush=True)
-            print(' * Text R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
-                .format(A_r1=A_r1, I_r1=I_r1, N=N_examples), flush=True)
-            
-            logging.info(' * Text R@20 {A_r20:.3f} Image R@20 {I_r20:.3f} over {N:d} validation pairs'
-                .format(A_r20=A_r20, I_r20=I_r20, N=N_examples))
-            logging.info(' * Text R@10 {A_r10:.3f} Image R@10 {I_r10:.3f} over {N:d} validation pairs'
-                .format(A_r10=A_r10, I_r10=I_r10, N=N_examples))
-            logging.info(' * Text R@5 {A_r5:.3f} Image R@5 {I_r5:.3f} over {N:d} validation pairs'
-                .format(A_r5=A_r5, I_r5=I_r5, N=N_examples))
-            logging.info(' * Text R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
-                .format(A_r1=A_r1, I_r1=I_r1, N=N_examples))
-            if wandb_config:
-                wandb_config.log({"val_Text_recall@20": A_r20, "val_Text_recall@20": I_r20, "epoch": epoch})
-                wandb_config.log({"val_Text_recall@10": A_r10, "val_Text_recall@10": I_r10, "epoch": epoch})
-                wandb_config.log({"val_Text_recall@5": A_r5, "val_Text_recall@5": I_r5, "epoch": epoch})
-                wandb_config.log({"val_Text_recall@1": A_r1, "val_Text_recall@5": I_r1, "epoch": epoch})
-
-
+            if args.use_text_backbone:
+                recalls =calc_recalls_reid(image_output, text_output, nframes, id_output, val_loader,type ="text", visualise_id = 10, simtype=args.simtype)
+                A_r20 = recalls['A_r20']
+                I_r20 = recalls['I_r20']
+                A_r10 = recalls['A_r10']
+                I_r10 = recalls['I_r10']
+                A_r5 = recalls['A_r5']
+                I_r5 = recalls['I_r5']
+                A_r1 = recalls['A_r1']
+                I_r1 = recalls['I_r1']
+                print(' * Text R@20 {A_r20:.3f} Image R@20 {I_r20:.3f} over {N:d} validation pairs'
+                    .format(A_r20=A_r20, I_r20=I_r20, N=N_examples), flush=True)
+                print(' * Text R@10 {A_r10:.3f} Image R@10 {I_r10:.3f} over {N:d} validation pairs'
+                    .format(A_r10=A_r10, I_r10=I_r10, N=N_examples), flush=True)
+                print(' * Text R@5 {A_r5:.3f} Image R@5 {I_r5:.3f} over {N:d} validation pairs'
+                    .format(A_r5=A_r5, I_r5=I_r5, N=N_examples), flush=True)
+                print(' * Text R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
+                    .format(A_r1=A_r1, I_r1=I_r1, N=N_examples), flush=True)
+                
+                logging.info(' * Text R@20 {A_r20:.3f} Image R@20 {I_r20:.3f} over {N:d} validation pairs'
+                    .format(A_r20=A_r20, I_r20=I_r20, N=N_examples))
+                logging.info(' * Text R@10 {A_r10:.3f} Image R@10 {I_r10:.3f} over {N:d} validation pairs'
+                    .format(A_r10=A_r10, I_r10=I_r10, N=N_examples))
+                logging.info(' * Text R@5 {A_r5:.3f} Image R@5 {I_r5:.3f} over {N:d} validation pairs'
+                    .format(A_r5=A_r5, I_r5=I_r5, N=N_examples))
+                logging.info(' * Text R@1 {A_r1:.3f} Image R@1 {I_r1:.3f} over {N:d} validation pairs'
+                    .format(A_r1=A_r1, I_r1=I_r1, N=N_examples))
+                if wandb_config:
+                    wandb_config.log({"val_Text_recall@20": A_r20, "val_Text_recall@20": I_r20, "epoch": epoch})
+                    wandb_config.log({"val_Text_recall@10": A_r10, "val_Text_recall@10": I_r10, "epoch": epoch})
+                    wandb_config.log({"val_Text_recall@5": A_r5, "val_Text_recall@5": I_r5, "epoch": epoch})
+                    wandb_config.log({"val_Text_recall@1": A_r1, "val_Text_recall@5": I_r1, "epoch": epoch})
 
     return recalls
 
