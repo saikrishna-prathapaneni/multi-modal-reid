@@ -63,6 +63,9 @@ def calc_recalls(image_outputs, audio_outputs, nframes,id_output, simtype='MISA'
 
     return recalls
 
+def get_association(I, A, audio_index, val_loader, save_dir ="res"):
+    pass
+
 
 def save_top_images(audio_index, A2I_ind, val_loader, save_dir ="res"):
     """
@@ -85,8 +88,8 @@ def save_top_images(audio_index, A2I_ind, val_loader, save_dir ="res"):
     fig, axes = plt.subplots(2, 5, figsize=(20, 8))
     for idx, ax in enumerate(axes.flatten()):
         # Use __getitem__ to load the image and its corresponding id
-        image, _, _, image_id = val_loader.dataset.__getitem__(top_image_indices[idx])
-        
+        image, _, _, image_id,_, _, _ = val_loader.dataset.__getitem__(top_image_indices[idx])
+        #image_input, audio_input, nframes, id, input_ids, attention_mask, text
         ax.imshow(image.permute(1, 2, 0))  # Adjust for channel order if necessary
         # Display the ID on the image
         ax.text(0.5, -0.15, f"ID: {image_id}", size=12, ha="center", transform=ax.transAxes, color='white')
@@ -243,7 +246,8 @@ def sampled_margin_rank_loss(args, image_outputs, audio_outputs,
     """
     assert(image_outputs.dim() == 4)
     assert(audio_outputs.dim() == 3)
-    assert(text_outputs.dim() == 2)
+    if args.use_text_backbone:
+        assert(text_outputs.dim() == 2)
 
     n = image_outputs.size(0)
     loss_total = torch.zeros(1, device=image_outputs.device, requires_grad=True)
@@ -431,4 +435,4 @@ def load_progress(prog_pkl, quiet=False):
     _print("\nPrevious Progress:")
     msg =  "[%5s %7s %5s %7s %6s]" % ("epoch", "step", "best_epoch", "best_avg_r10", "time")
     _print(msg)
-    return prog, epoch, global_step, best_epoch, best_avg_r10
+    return prog, epoch-2, global_step, best_epoch, best_avg_r10
