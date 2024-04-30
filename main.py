@@ -33,7 +33,7 @@ parser.add_argument("--exp-dir", type=str, default="",
         help="directory to dump experiments")
 parser.add_argument("--resume", action="store_true", dest="resume",
         help="load from exp_dir if True")
-parser.add_argument("--optim", type=str, default="adagrad",
+parser.add_argument("--optim", type=str, default="sgd",
         help="training optimizer", choices=["sgd", "adam","adagrad"])
 parser.add_argument('-b', '--batch-size', default=64, type=int,
     metavar='N', help='mini-batch size (default: 100)')
@@ -55,7 +55,7 @@ parser.add_argument("--image-model", type=str, default="resnet",
         help="image model architecture", choices=["VGG16"])
 parser.add_argument("--text_model", type=str, default="bert",
         help="text model architecture", choices=["bert"])
-parser.add_argument("--use_text_backbone", type=bool, default=True,
+parser.add_argument("--use_text_backbone", type=bool, default=False,
         help="text backbone architecture")
 parser.add_argument("--different_text_prompt", type=bool, default=True,
         help="different text prompt for similarity match")
@@ -100,7 +100,7 @@ args.resume = resume
 
 train_loader = torch.utils.data.DataLoader(
 dataloaders.ImageCaptionDataset(args,args.data_train),
-batch_size=8, shuffle=True, num_workers=2)
+batch_size=args.batch_size, shuffle=True, num_workers=2)
 
 val_loader = torch.utils.data.DataLoader(
 dataloaders.ImageCaptionDataset(args,args.data_val, image_conf={'center_crop':False},type="test"),
@@ -110,9 +110,9 @@ audio_model = models.EnhancedDavenet()
 #image_model = models.VGG16()
 
 #image_model = models.Resnet50_Dino()
-#image_model = models.Resnet50_Luperson()
+image_model = models.Resnet50_MOCO()
 
-image_model = models.Resnet50(pretrained=True)
+#image_model = models.Resnet50(pretrained=True)
 
 #text_model = BertModel.from_pretrained('bert-base-uncased')
 text_model= None
@@ -121,8 +121,8 @@ if args.use_text_backbone:
 
 if not bool(args.exp_dir):
         print("exp_dir not specified, automatically creating one...")
-        args.exp_dir = "exp/Data-%s/AudioModel-%s_ImageModel-%s_TextModel-%s_Optim-%s_LR-%s_Epochs-%s_tweak_resnet50_I" % (
-                os.path.basename(args.data_train), args.audio_model, args.image_model, args.text_model, args.optim,
+        args.exp_dir = "exp/Data-%s/AudioModel-%s_ImageModel-%s_Optim-%s_LR-%s_Epochs-%s_tweak_resnet50_final" % (
+                os.path.basename(args.data_train), args.audio_model, args.image_model, args.optim,
                 args.lr, args.n_epochs)
 
 if not args.resume:
